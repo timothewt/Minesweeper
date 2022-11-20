@@ -3,7 +3,7 @@ from models import *
 
 def main():
     game = Game()
-    game.start_game()
+    game.start()
 
 
 if __name__ == "__main__":

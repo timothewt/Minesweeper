@@ -1,7 +1,7 @@
 import random
 import time
 from math import log10
-import pygame
+import pygame as pg
 import numpy as np
 
 
@@ -14,7 +14,7 @@ class Grid:
             self.bombs = []
             self.place_bombs()
             self.grid = np.full([self.grid_height, self.grid_width], -1, dtype=int)
-            self.game_ended = False
+            self.game_status = 0  # -1: player lost, 0: still playing, 1: player won
         else:
             self.grid = []
 
@@ -96,12 +96,13 @@ class Grid:
         if current_cell_bombs == 9:
             self.discover_all_non_flagged_bombs()
             self.grid[cell_coordinates] = 10  # indicates the bomb that made the player loose
-            self.game_ended = True
+            self.game_status = -1
         if current_cell_bombs == 0:  # if there are no bombs near, discovers all its neighbours
             neighbours = self.get_neighbours(cell_coordinates)
             undiscovered_neighbours = [neighbour for neighbour in neighbours if self.grid[neighbour] == -1]
             for neighbour in undiscovered_neighbours:
                 self.discover_cell(neighbour)
+        self.update_game_status()
 
     def discover_all_non_flagged_bombs(self) -> None:
         """
@@ -115,7 +116,6 @@ class Grid:
                         self.grid[i, j] = 9
                 elif self.grid[i, j] == -2:  # if we flagged a bomb
                     self.grid[i, j] = -3  # -3 means no bomb but flagged
-
 
     def get_remaining_non_flagged_bombs_nb(self):
         flags = self.grid == -2
@@ -143,156 +143,129 @@ class Grid:
             return True
         return False
 
-    def has_discovered_all_non_bombs_cells(self) -> bool:
+    def update_game_status(self) -> bool:
         """
         Counts the remaining undiscovered cells and compares it to the number of bombs
         :return: True if the player discovered all the non-bombs cells, False otherwise
         """
         non_discovered_cells = self.grid < 0  # -1 for non-flagged bombs, -2 for flagged bombs
-        return np.count_nonzero(non_discovered_cells) == self.bombs_nb
-
-    def has_discovered_bomb_cell(self) -> bool:
-        """
-        Checks if there is a bomb cell discovered
-        :return: True if a bomb has been discovered, False otherwise
-        """
-        return 9 in self.grid
+        if np.count_nonzero(non_discovered_cells) == self.bombs_nb:
+            self.game_status = 1
+            self.flag_non_flagged_bombs()
 
 
 class Timer:
-    def __init__(self):
+    def __init__(self) -> None:
         self.start = time.time()
         self.time = 0
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Elapsed time: {self.time}s"
 
-    def update(self):
+    def update(self) -> None:
+        """
+        Updates the time elapsed since the instantiation of the timer
+        """
         self.time = int(time.time() - self.start)
 
 
-class MenuGUI:
+class Game:
     def __init__(self):
-        self.screen_width = 400
-        self.screen_height = 400
-        self.difficulty = 0
-
-    def draw_centered_text(self, screen: pygame.Surface, text: str, font_size: int, y_pos: int) -> None:
-        font = pygame.font.SysFont('gothambold', font_size)
-        t = font.render(text, True, (0, 0, 0))
-        screen.blit(t, (self.screen_width // 2 - t.get_width() // 2, y_pos))
-
-    def draw_centered_rect(self, screen: pygame.Surface, height: int, width: int, y_pos: int) -> None:
-        x_pos = (self.screen_width - width) // 2
-        pygame.draw.line(screen, (180, 180, 180), (x_pos, y_pos), (x_pos + width, y_pos), 3)
-        pygame.draw.line(screen, (180, 180, 180), (x_pos, y_pos), (x_pos, y_pos + height), 3)
-        pygame.draw.line(screen, (80, 80, 80), (x_pos + width, y_pos + height), (x_pos + width, y_pos), 3)
-        pygame.draw.line(screen, (80, 80, 80), (x_pos + width, y_pos + height), (x_pos, y_pos + height), 3)
-        pygame.draw.rect(screen, (130, 130, 130), pygame.Rect(x_pos, y_pos, width, height))
-
-    def draw_centered_rect_dark(self, screen: pygame.Surface, height: int, width: int, y_pos: int) -> None:
-        x_pos = (self.screen_width - width) // 2
-        pygame.draw.line(screen, (150, 150, 150), (x_pos, y_pos), (x_pos + width, y_pos), 3)
-        pygame.draw.line(screen, (150, 150, 150), (x_pos, y_pos), (x_pos, y_pos + height), 3)
-        pygame.draw.line(screen, (50, 50, 50), (x_pos + width, y_pos + height), (x_pos + width, y_pos), 3)
-        pygame.draw.line(screen, (50, 50, 50), (x_pos + width, y_pos + height), (x_pos, y_pos + height), 3)
-        pygame.draw.rect(screen, (100, 100, 100), pygame.Rect(x_pos, y_pos, width, height))
-
-    def draw_button(self, screen: pygame.Surface, text: str, height: int, width: int, y_pos: int) -> None:
-        self.draw_centered_rect(screen, height, width, y_pos)
-        self.draw_centered_text(screen, text, height // 2, y_pos + height // 4)
-
-    def draw_hovered_button(self, screen: pygame.Surface, text: str, height: int, width: int, y_pos: int) -> None:
-        self.draw_centered_rect_dark(screen, height, width, y_pos)
-        self.draw_centered_text(screen, text, height // 2, y_pos + height // 4)
-
-    def draw_button_list(self, screen: pygame.Surface, buttons: list[str | int | str | int | int | int]):
-        for button in buttons:
-            self.draw_button(screen, button[2], button[3], button[4], button[5])
-
-    def display(self):
-        pygame.init()
-        screen = pygame.display.set_mode((self.screen_width, self.screen_height))
-        pygame.display.set_caption('Minesweeper - Menu')
-        screen.fill((200, 200, 200))
-
-        buttons = [  # [action, value, text, height, width, y_pos]
-            ["start", 0, "Beginner", 50, 200, 130],
-            ["start", 1, "Intermediate", 50, 200, 200],
-            ["start", 2, "Expert", 50, 200, 270],
-            ["quit", -1, "Quit", 30, 130, 340]
-        ]
-
-        self.draw_centered_text(screen, "Minesweeper", 50, 30)
-        self.draw_button_list(screen, buttons)
-
-        pygame.display.update()
-
-        while True:  # displays the window until the player picks a difficulty or leaves the game
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    exit()
-                if event.type == pygame.MOUSEMOTION:
-                    self.draw_button_list(screen, buttons)
-                    mouse_pos = pygame.mouse.get_pos()
-                    x = mouse_pos[0]
-                    y = mouse_pos[1]
-                    for button in buttons:
-                        if 0 <= x - (self.screen_width - button[4]) // 2 <= button[4] and 0 <= y - button[5] <= button[3]:
-                            self.draw_hovered_button(screen, button[2], button[3], button[4], button[5])
-                            break
-                    pygame.display.update()
-                if event.type == pygame.MOUSEBUTTONDOWN:
-                    mouse_pos = pygame.mouse.get_pos()
-                    x = mouse_pos[0]
-                    y = mouse_pos[1]
-                    clicked_button = None
-                    for button in buttons:
-                        if 0 <= x - (self.screen_width - button[4]) // 2 <= button[4] and 0 <= y - button[5] <= button[3]:
-                            clicked_button = button
-                            break
-                    if clicked_button:
-                        if clicked_button[0] == "start":
-                            self.difficulty = clicked_button[1]
-                            pygame.display.quit()
-                            break
-                        else:
-                            exit()
-            else:
-                continue
-            break
-
-
-class GameGUI:
-    def __init__(self):
+        pg.init()
         self.difficulty = 0
         self.grid_width = 0
         self.grid_height = 0
         self.bombs_nb = 0
+        self.screen = None
         self.grid = None
-        self.flag_img = None
-        self.bomb_img = None
-        self.no_bomb_img = None
+        self.flag_img = pg.image.load("assets/flag.png")
+        self.bomb_img = pg.image.load("assets/bomb.png")
+        self.no_bomb_img = pg.image.load("assets/no_bomb.png")
         self.timer = None
+        self.buttons = None
 
-    def draw_undiscovered_cell(self, screen: pygame.Surface, x: int, y: int, flagged: bool = False):
-        pygame.draw.line(screen, (220, 220, 220), (x + 1, y + 1), (x + 20, y + 1), 2)
-        pygame.draw.line(screen, (220, 220, 220), (x + 1, y + 1), (x + 1, y + 20), 2)
-        pygame.draw.line(screen, (120, 120, 120), (x + 19, y + 19), (x + 19, y + 1), 2)
-        pygame.draw.line(screen, (120, 120, 120), (x + 19, y + 19), (x + 1, y + 19), 2)
-        pygame.draw.rect(screen, (170, 170, 170), pygame.Rect(x + 2, y + 2, 16, 16))
+    def draw_text(self, text: str, font_size: int, color: tuple[int], y: int, x: int = None, font: str = 'gothambold') -> None:
+        """
+        Draws a string on the current pygame screen. If x is not specified, the text is horizontally centered.
+        :param text: string to write
+        :param font_size: font size of the text
+        :param color: gray_level of the text, (r,g,b)
+        :param y: y position
+        :param x: x position (optional)
+        :param font: font of the text
+        """
+        font = pg.font.SysFont(font, font_size)
+        t = font.render(text, True, color)
+        if x is None:
+            x = pg.display.get_surface().get_size()[0] // 2 - t.get_width() // 2
+        self.screen.blit(t, (x, y))
+
+    def draw_rect(self, height: int, width: int, gray_level: int, y: int, x: int = None, border_width: int = 2) -> None:
+        """
+        Draws a rectangle on the current pygame screen. If x is not specified, the text is horizontally centered.
+        :param height: height of the rectangle
+        :param width: width of the rectangle
+        :param gray_level: gray level of the rectangle
+        :param y: y position
+        :param x: x position (optional)
+        :param border_width: width of the border of the rectangle
+        """
+        if x is None:
+            x = pg.display.get_surface().get_size()[0] // 2 - width // 2
+        main_color = tuple(gray_level for _ in range(0, 3))
+        high_color = tuple(min(gray_level + 50, 255) for _ in range(0, 3))
+        low_color = tuple(max(gray_level - 50, 0) for _ in range(0, 3))
+        h_b_w = border_width // 2  # half border width
+        top_y = y + h_b_w - 1
+        bottom_y = y + height - h_b_w - 1
+        left_x = x + h_b_w - 1
+        right_x = x + width - h_b_w - 1
+        pg.draw.rect(self.screen, main_color, pg.Rect(x, y, width, height))
+        pg.draw.line(self.screen, high_color, (x, top_y), (right_x, top_y), border_width)
+        pg.draw.line(self.screen, high_color, (left_x, y), (left_x, bottom_y), border_width)
+        pg.draw.line(self.screen, low_color, (right_x, bottom_y), (right_x, y), border_width)
+        pg.draw.line(self.screen, low_color, (right_x + h_b_w, bottom_y), (x, bottom_y), border_width)
+
+    def draw_button(self, text: str, height: int, width: int, gray_level: int, y: int, x: int = None) -> None:
+        """
+        Draws a button which is a rectangle with a text on it on the current pygame screen.
+        :param text: text of the button
+        :param height: height of the button
+        :param width: width of the button
+        :param gray_level: gray level of the button
+        :param y: y position
+        :param x: x position (optional)
+        :return:
+        """
+        self.draw_rect(height, width, gray_level, y, x)
+        self.draw_text(text, height // 2, (0, 0, 0), y + height // 4, x)
+
+    def draw_undiscovered_cell(self, y: int, x: int, flagged: bool = False) -> None:
+        """
+        Draws an undiscovered cell, which is a rectangle. Puts a flag image on it if flagged.
+        :param y: y position
+        :param x: x position
+        :param flagged: True if the cell is flagged, False otherwise
+        """
+        self.draw_rect(20, 20, 170, y, x, 2)
         if flagged:
-            screen.blit(self.flag_img, (x + 1, y + 1))
+            self.screen.blit(self.flag_img, (x + 1, y + 1))
 
-    def draw_discovered_cell(self, screen: pygame.Surface, x: int, y: int, value: int):
-        pygame.draw.rect(screen, (130, 130, 130), pygame.Rect(x + 1, y + 1, 18, 18))
-        pygame.draw.rect(screen, (80, 80, 80), pygame.Rect(x, y, 20, 20), 1)
+    def draw_discovered_cell(self, y: int, x: int, value: int) -> None:
+        """
+        Draws a discovered cell, with the number of bombs around it (blank if 0), a bomb if it's a bomb cell
+        :param y: y position
+        :param x: x position
+        :param value: value of the cell (0-10)
+        """
+        self.draw_rect(20, 20, 80, y, x, 0)
+        self.draw_rect(19, 19, 130, y + 1, x + 1, 0)
         if value == 10:
-            pygame.draw.rect(screen, (200, 0, 0), pygame.Rect(x + 1, y + 1, 18, 18))
+            pg.draw.rect(self.screen, (200, 0, 0), pg.Rect(x + 1, y + 1, 18, 18))
         if value == 9 or value == 10:
-            screen.blit(self.bomb_img, (x + 1, y + 1))
+            self.screen.blit(self.bomb_img, (x + 1, y + 1))
         elif value == -3:
-            screen.blit(self.no_bomb_img, (x + 1, y + 1))
+            self.screen.blit(self.no_bomb_img, (x + 1, y + 1))
         elif value != 0:
             color = (0, 0, 0)
             match value:
@@ -311,86 +284,165 @@ class GameGUI:
                 case 7:
                     color = (0, 0, 0)
                 case 8:
-                    color = (128, 128, 128)
-            font = pygame.font.SysFont('gothambold', 16)
-            t = font.render(str(value), True, color)
-            screen.blit(t, (x + 10 - t.get_width() // 2, y + 3))
+                    color = (100, 100, 100)
+            self.draw_text(str(value), 16, color, y + 3, x + 5)
 
-    def draw_grid(self, screen: pygame.Surface):
-        pygame.draw.line(screen, (220, 220, 220), (18, 68), (18 + self.grid_width * 20 + 4, 68), 2)
-        pygame.draw.line(screen, (220, 220, 220), (18, 68), (18, 68 + self.grid_height * 20 + 4), 2)
-        pygame.draw.line(screen, (120, 120, 120), (18 + self.grid_width * 20 + 4, 68 + self.grid_height * 20 + 4), (18 + self.grid_width * 20 + 4, 68), 2)
-        pygame.draw.line(screen, (120, 120, 120), (18 + self.grid_width * 20 + 4, 68 + self.grid_height * 20 + 4), (18, 68 + self.grid_height * 20 + 4), 2)
-        pygame.draw.rect(screen, (200, 200, 200), (20, 70, self.grid_width * 20, self.grid_height * 20))
+    def draw_grid(self):
+        """
+        Draws the game grid on the current screen
+        """
+        self.draw_rect(self.grid_height * 20 + 4, self.grid_width * 20 + 4, 170, 68, 18)
         for i in range(0, self.grid_height):
             for j in range(0, self.grid_width):
                 if -3 < self.grid.grid[i, j] < 0:
-                    self.draw_undiscovered_cell(screen, 20 + 20 * j, 70 + 20 * i, self.grid.grid[i, j] == -2)
+                    self.draw_undiscovered_cell(70 + 20 * i, 20 + 20 * j, self.grid.grid[i, j] == -2)
                 else:
-                    self.draw_discovered_cell(screen, 20 + 20 * j, 70 + 20 * i, self.grid.grid[i, j])
+                    self.draw_discovered_cell(70 + 20 * i, 20 + 20 * j, self.grid.grid[i, j])
 
-    def draw_menu_bar(self, screen: pygame.Surface):
-        pygame.draw.line(screen, (220, 220, 220), (18, 8), (18 + self.grid_width * 20 + 4, 8), 2)
-        pygame.draw.line(screen, (220, 220, 220), (18, 8), (18, 8 + 50 + 4), 2)
-        pygame.draw.line(screen, (120, 120, 120), (18 + self.grid_width * 20 + 4, 8 + 50 + 4), (18 + self.grid_width * 20 + 4, 8), 2)
-        pygame.draw.line(screen, (120, 120, 120), (18 + self.grid_width * 20 + 4, 8 + 50 + 4), (18, 8 + 50 + 4), 2)
-        bg_color = (170, 170, 170)
-        if self.grid.game_ended:
-            if self.grid.has_discovered_all_non_bombs_cells():
-                bg_color = (0, 160, 0)
-            else:
-                bg_color = (160, 0, 0)
-        pygame.draw.rect(screen, bg_color, pygame.Rect(20, 10, self.grid_width * 20, 50))
-        self.draw_timer(screen)
-        self.draw_remaining_non_flagged_bombs(screen)
-
-    def draw_timer(self, screen: pygame.Surface):
+    def draw_timer(self, y: int, x: int) -> None:
+        """
+        Draws the timer of the game
+        :param y: y position
+        :param x: x position
+        """
         self.timer.update()
         current_time = self.timer.time
         if current_time > 99:
-            timer_width = 35 + 15 * int(log10(current_time))
+            width = 35 + 15 * int(log10(current_time))
         else:
-            timer_width = 65
-        pygame.draw.rect(screen, (0, 0, 0), pygame.Rect(25, 15, timer_width, 40))
-        font = pygame.font.SysFont('arialbold', 50)
-        timer_text = str(current_time)
-        if current_time < 10:
-            timer_text = '00' + timer_text
-        elif current_time < 100:
-            timer_text = '0' + timer_text
-        t = font.render(timer_text, True, (200, 0, 0))
-        screen.blit(t, (25 + timer_width // 2 - t.get_width() // 2, 15 + 4))
+            width = 65
+        text = '00' + str(current_time) if current_time < 10 else ('0' + str(current_time) if current_time < 100 else str(current_time))
+        self.draw_rect(40, width, 10, y, x, 0)
+        self.draw_text(text, 44, (200, 0, 0), y + 7, x + 5, 'arialbold')
 
-    def draw_remaining_non_flagged_bombs(self, screen: pygame.Surface):
-        remaining_non_flagged_bombs = self.grid.get_remaining_non_flagged_bombs_nb()
-        string = str(remaining_non_flagged_bombs) if remaining_non_flagged_bombs > 9 else '0' + str(remaining_non_flagged_bombs)
-        pygame.draw.rect(screen, (0, 0, 0), pygame.Rect(20 + self.grid_width * 20 - 50 - 5, 15, 50, 40))
-        font = pygame.font.SysFont('arialbold', 50)
-        text = font.render(string, True, (200, 0, 0))
-        screen.blit(text, (20 + self.grid_width * 20 - 25 - 5 - text.get_width() // 2, 15 + 4))
+    def draw_remaining_non_flagged_bombs_nb(self, y: int, x: int) -> None:
+        """
+        Draws the remaining non-flagged bombs number in the grid
+        :param y: y position
+        :param x: x position
+        """
+        number = self.grid.get_remaining_non_flagged_bombs_nb()
+        text = str(number) if number > 9 else '0' + str(number)
+        self.draw_rect(40, 44, 0, y, x)
+        self.draw_text(text, 44, (200, 0, 0), y + 7, x + 5, 'arialbold')
 
-    def display(self):
-        pygame.init()
-        screen = pygame.display.set_mode((self.grid_width * 20 + 40, self.grid_height * 20 + 40 + 50))
-        pygame.display.set_caption(
-            f'Minesweeper - In-Game - {"Beginner" if self.difficulty == 0 else "Intermediate" if self.difficulty == 1 else "Expert"}')
-        screen.fill((200, 200, 200))
+    def draw_info_bar(self, game_status: int = 0) -> None:
+        """
+        Draws the info bar with the timer and remaining bombs
+        :param game_status: -1: player lost, 0: currently playing, 1: player won
+        """
+        self.draw_rect(54, self.grid_width * 20 + 4, 190, 8, 18, 2)
+        if self.timer:
+            self.draw_timer(15, 25)
+        if self.grid:
+            self.draw_remaining_non_flagged_bombs_nb(15, 20 + self.grid_width * 20 - 50)
+        if game_status == 1:
+            self.draw_button("You Won!", 30, 96, 170, 20)
+        if game_status == -1:
+            self.draw_button("You Lost!", 30, 100, 170, 20)
 
-        self.flag_img = pygame.image.load("assets/flag.png")
-        self.bomb_img = pygame.image.load("assets/bomb.png")
-        self.no_bomb_img = pygame.image.load("assets/no_bomb.png")
-        self.timer = Timer()
+    def draw_buttons(self):
+        """
+        Draws all the buttons of the object
+        """
+        [self.draw_button(btn[1], btn[2], btn[3], 170, btn[4]) for btn in self.buttons]
 
-        self.draw_grid(screen)
-        self.draw_menu_bar(screen)
-        pygame.display.update()
+    def start(self):
+        """
+        Starts the game by displaying the menu
+        """
+        self.display_menu()
+        self.menu()
 
+    def display_menu(self):
+        """
+        Displays all the elements of the menu on the current screen (label and buttons)
+        """
+        self.screen = pg.display.set_mode((400, 400))
+        pg.display.set_caption('Minesweeper - Menu')
+        self.screen.fill((200, 200, 200))
+        self.buttons = [  # [action, value, text, height, width, y]
+            [0, "Beginner", 50, 200, 130],
+            [1, "Intermediate", 50, 200, 200],
+            [2, "Expert", 50, 200, 270],
+            [-1, "Quit", 30, 130, 340]
+        ]
+        self.draw_buttons()
+        pg.display.update()
+
+    def menu(self):
+        """
+        Menu of the game, where the player chooses the difficulty of the game
+        """
+        screen_width = pg.display.get_surface().get_size()[0]
         while True:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+            for event in pg.event.get():
+                if event.type == pg.QUIT:
                     exit()
-                if event.type == pygame.MOUSEBUTTONDOWN and not self.grid.game_ended:
-                    mouse_pos = pygame.mouse.get_pos()
+                elif event.type == pg.MOUSEMOTION or event.type == pg.MOUSEBUTTONDOWN:
+                    self.draw_buttons()
+                    mouse_pos = pg.mouse.get_pos()
+                    x = mouse_pos[0]
+                    y = mouse_pos[1]
+                    clicked_button = None
+                    for btn in self.buttons:
+                        if 0 <= x - (screen_width - btn[3]) // 2 <= btn[3] and 0 <= y - btn[4] <= btn[2]:
+                            if event.type == pg.MOUSEMOTION:
+                                self.draw_button(btn[1], btn[2], btn[3], 120, btn[4])
+                            else:
+                                self.draw_button(btn[1], btn[2], btn[3], 80, btn[4])
+                                clicked_button = btn
+                            break
+                    if clicked_button:
+                        if clicked_button[0] >= 0:
+                            self.difficulty = clicked_button[0]
+                            if self.difficulty == 0:
+                                [self.grid_height, self.grid_width, self.bombs_nb] = [9, 9, 10]
+                            elif self.difficulty == 1:
+                                [self.grid_height, self.grid_width, self.bombs_nb] = [16, 16, 40]
+                            else:
+                                [self.grid_height, self.grid_width, self.bombs_nb] = [16, 30, 99]
+                            self.grid = Grid(self.grid_height, self.grid_width, self.bombs_nb)
+                            self.display_game()
+                            break
+                        else:
+                            exit()
+                    pg.display.update()
+            else:
+                continue
+            break
+        self.play_game()
+
+    def display_game(self) -> None:
+        """
+        Displays the components of the game and creates a new screen instance
+        """
+        screen = pg.display.set_mode((self.grid_width * 20 + 40, self.grid_height * 20 + 40 + 50))
+        pg.display.set_caption(
+            f'Minesweeper - {"Beginner" if self.difficulty == 0 else "Intermediate" if self.difficulty == 1 else "Expert"}'
+        )
+        screen.fill((200, 200, 200))
+        self.draw_grid()
+        self.draw_info_bar()
+        pg.display.update()
+
+    def play_game(self) -> None:
+        """
+        Main game loop
+        """
+        self.timer = Timer()
+        while True:
+            if self.grid.game_status == 0:
+                self.draw_timer(15, 25)
+            for event in pg.event.get():
+                if event.type == pg.QUIT or (event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE):
+                    exit()
+                if event.type == pg.KEYDOWN and event.key == pg.K_r:
+                    self.display_menu()
+                    self.menu()
+                    break
+                if event.type == pg.MOUSEBUTTONDOWN and self.grid.game_status == 0:
+                    mouse_pos = pg.mouse.get_pos()
                     x = mouse_pos[0]
                     y = mouse_pos[1]
 
@@ -399,50 +451,11 @@ class GameGUI:
                         cell_y = (y - 70) // 20
                         if event.button == 1:  # left click
                             self.grid.discover_cell((cell_y, cell_x))
-                            if self.grid.has_discovered_all_non_bombs_cells():
-                                self.grid.flag_non_flagged_bombs()
-                                self.grid.game_ended = True
                         elif event.button == 3:  # right click
                             self.grid.flag_cell((cell_y, cell_x))
-                            self.draw_remaining_non_flagged_bombs(screen)
-                        self.draw_grid(screen)
-            if self.grid.game_ended:
-                self.draw_menu_bar(screen)
-                pygame.display.update()
-                while True:
-                    for event in pygame.event.get():
-                        if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
-                            exit()
-                        elif event.type == pygame.KEYDOWN and event.key == pygame.K_r:
-                            self.start_game()
-                            break
-                    else:
-                        continue
-                    break
-            else:
-                self.draw_timer(screen)
-            pygame.display.update()
-
-    def start_game(self):
-        self.grid = Grid(self.grid_height, self.grid_width, self.bombs_nb)
-        self.timer = Timer()
-        self.display()
-
-
-class Game:
-    def __init__(self):
-        self.menu_gui = MenuGUI()
-        self.game_gui = GameGUI()
-        self.difficulty = 0
-
-    def start_game(self):
-        self.menu_gui.display()
-        self.difficulty = self.menu_gui.difficulty
-        self.game_gui.difficulty = self.difficulty
-        if self.difficulty == 0:
-            [self.game_gui.grid_height, self.game_gui.grid_width, self.game_gui.bombs_nb] = [9, 9, 10]
-        elif self.difficulty == 1:
-            [self.game_gui.grid_height, self.game_gui.grid_width, self.game_gui.bombs_nb] = [16, 16, 40]
-        else:
-            [self.game_gui.grid_height, self.game_gui.grid_width, self.game_gui.bombs_nb] = [16, 30, 99]
-        self.game_gui.start_game()
+                            self.draw_remaining_non_flagged_bombs_nb(15, 20 + self.grid_width * 20 - 50)
+                        self.draw_grid()
+                    if self.grid.game_status != 0:
+                        self.draw_info_bar(self.grid.game_status)
+                        pg.display.update()
+            pg.display.update()

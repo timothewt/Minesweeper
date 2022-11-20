@@ -12,5 +12,4 @@ When the game ended, you can press [R] to restart or escape to leave.
 
 To do
 ---
-- Documentation
 - Custom grid (size / number of mines)
